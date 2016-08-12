@@ -52,14 +52,22 @@ class AgentMiddleware(object):
 
     def process_view(self, request, view_func, view_args, view_kwargs):
         if self.is_active:
+            try:
+                if request.resolver_match:
+                    func = request.resolver_match._func_path
+                    context.set_tag('function', func)
+            except:
+                logger.exception("Unexpected exception setting route tag")
+
             telemetry.record('web.view.latency', time.time() - self.is_active)
 
     def process_response(self, request, response):
         elapsed, net_elapsed = Timing.pop_timer()
         if self.is_active:
+            telemetry.count('web.status.%ixx' % floor(response.status_code / 100))
+            context.set_tag('status', response.status_code)
             telemetry.record('web.response.latency', elapsed)
             telemetry.record('app.response.latency', net_elapsed)
-            telemetry.count('web.status.%ixx' % floor(response.status_code / 100))
             context.pop_state(STATE_NAME)
             self.is_active = False
         else:
@@ -93,10 +101,15 @@ def django_inject_middleware(original_method, *args, **keywords):
 def _django_wsgi_call(original_method, *args, **keywords):
     Timing.push_timer()
     try:
+        try:
+            context.set_tag('method', args[1]['REQUEST_METHOD'])
+        except:
+            pass
         return original_method(*args, **keywords)
     finally:
         elapsed, _ = Timing.pop_timer()
         telemetry.record('wsgi.response.latency', elapsed)
+        context.reset_tags()
 
 
 class DjangoCoreInstrumentor(BaseInstrumentor):

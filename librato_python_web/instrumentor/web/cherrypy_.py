@@ -27,6 +27,7 @@
 
 import time
 
+from librato_python_web.instrumentor import context as context
 from librato_python_web.instrumentor import telemetry
 from librato_python_web.instrumentor.base_instrumentor import BaseInstrumentor
 from librato_python_web.instrumentor.instrument import get_conditional_wrapper
@@ -48,6 +49,7 @@ def _cherrypy_respond_wrapper(func, *args, **keywords):
 
         if response.status:
             telemetry.count('web.status.%sxx' % response.status[0:1])
+            context.set_tag('status', response.status)
         return response
     except Exception as e:
         telemetry.count('web.errors')
@@ -65,10 +67,16 @@ def _cherrypy_respond_wrapper(func, *args, **keywords):
 def _cherrypy_wsgi_call(func, *args, **keywords):
     t = time.time()
     try:
+        try:
+            context.set_tag('path', args[1]['PATH_INFO'])
+            context.set_tag('method', args[1]['REQUEST_METHOD'])
+        except:
+            pass
         return func(*args, **keywords)
     finally:
         elapsed = time.time() - t
         telemetry.record('wsgi.response.latency', elapsed)
+        context.reset_tags()
 
 
 class CherryPyInstrumentor(BaseInstrumentor):

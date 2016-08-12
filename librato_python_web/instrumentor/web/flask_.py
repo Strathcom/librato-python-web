@@ -24,9 +24,11 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 """ Flask instrumentation """
+from importlib import import_module
 from math import floor
 import time
 
+from librato_python_web.instrumentor import context as context
 from librato_python_web.instrumentor import telemetry
 from librato_python_web.instrumentor.base_instrumentor import BaseInstrumentor
 from librato_python_web.instrumentor.instrument import get_conditional_wrapper
@@ -36,12 +38,17 @@ from librato_python_web.instrumentor.custom_logging import getCustomLogger
 
 logger = getCustomLogger(__name__)
 
+class __globals:
+    # Reference to a flask.globals module which will be imported later
+    flask_globals = None
+
 
 def _after_request(response):
     # We need this since the response object isn't available in main function wrapper below (flask_dispatch).
     # Might not get called in the event of an application error.
     if response.status_code:
         telemetry.count('web.status.%ixx' % floor(response.status_code / 100))
+        context.set_tag('status', response.status_code)
     return response
 
 
@@ -65,6 +72,19 @@ def _flask_app(f, *args, **keywords):
 
 def _flask_dispatch(f, *args, **keywords):
     try:
+        try:
+            if not __globals.flask_globals:
+                # Flask should already have been imported so this won't actually
+                # load anything new
+                __globals.flask_globals = import_module('flask.globals')
+
+            req = __globals.flask_globals._request_ctx_stack.top.request
+            if req.url_rule:
+                route = req.url_rule.rule.replace('<', ':').replace('>', ':')
+                context.set_tag('route', route)
+        except:
+            logger.exception("Unexpected exception setting route tag")
+
         telemetry.count('web.requests')
         Timing.push_timer()
 
@@ -78,10 +98,15 @@ def _flask_dispatch(f, *args, **keywords):
 def _flask_wsgi_call(f, *args, **kwargs):
     t = time.time()
     try:
+        try:
+            context.set_tag('method', args[1]['REQUEST_METHOD'])
+        except:
+            pass
         return f(*args, **kwargs)
     finally:
         elapsed = time.time() - t
         telemetry.record('wsgi.response.latency', elapsed)
+        context.reset_tags()
 
 
 class FlaskInstrumentor(BaseInstrumentor):

@@ -3,6 +3,7 @@ from collections import defaultdict
 
 from librato_python_web.statsd.client import statsd_client
 from librato_python_web.instrumentor.custom_logging import getCustomLogger
+from librato_python_web.instrumentor.context import get_tags
 
 logger = getCustomLogger(__name__)
 
@@ -168,13 +169,13 @@ class StatsdTelemetryReporter(TelemetryReporter):
         self.prefix = prefix
 
     def count(self, metric, incr=1):
-        self.client.increment(metric, incr)
+        self.client.increment(metric, incr, tags=get_tags())
 
     def record(self, metric, value, is_timer=True):
         if is_timer:
-            self.client.timing(metric, value * 1000)
+            self.client.timing(metric, value * 1000, tags=get_tags())
         else:
-            self.client.gauge(metric, value)
+            self.client.gauge(metric, value, tags=get_tags())
 
     def event(self, type_name, dictionary=None):
         # TBD: Not implemented
